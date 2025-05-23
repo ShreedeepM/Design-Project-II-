@@ -17,14 +17,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.core.os_manager import ChromeType
 
 from selenium.common.exceptions import TimeoutException
-
+options=Options()
 @st.cache_resource
 def get_driver():
     return webdriver.Chrome(
         service=Service(
             ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
         ),
-        options=Options(),
+        options=options,
     )
 def fun(username,password):
     # ===== CONFIGURATION =====
