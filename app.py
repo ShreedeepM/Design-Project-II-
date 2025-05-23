@@ -24,7 +24,7 @@ def get_driver():
         service=Service(
             ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
         ),
-        options=Options,
+        options=Options(),
     )
 def fun(username,password):
     # ===== CONFIGURATION =====
