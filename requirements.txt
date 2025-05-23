@@ -1,7 +1,5 @@
 
-seleniumbase==1.15.3
+seleniumbase
 
 
-webdriver-manager==4.0.2
-
-wsproto==1.2.0
+webdriver-manager
