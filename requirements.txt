@@ -1,5 +1,5 @@
 
 seleniumbase
 streamlit
-
+pandas
 webdriver-manager
