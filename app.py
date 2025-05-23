@@ -39,9 +39,9 @@ def fun(username,password):
     options.add_argument("--window-size=1920,1080")
     msg = st.empty()
     service = Service(ChromeDriverManager().install())
-    
+    get_driver()
     # Setup Selenium WebDriver (using Chrome in GUI mode)
-    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)  # This will open the browser with a GUI window
+    driver = webdriver.Chrome(service=service,options=options)  # This will open the browser with a GUI window
     msg.info("Signing In.Please wait")
         # Open Cognito login page
     driver.get(Cognito_URL)
