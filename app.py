@@ -20,11 +20,15 @@ from selenium.common.exceptions import TimeoutException
 options=Options()
 @st.cache_resource
 def get_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+
     return webdriver.Chrome(
-        service=Service(
-            ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
-        ),
-        options=options,
+        service=Service(ChromeDriverManager().install()),
+        options=chrome_options,
     )
 def fun(username,password):
     # ===== CONFIGURATION =====
@@ -33,14 +37,7 @@ def fun(username,password):
     PASSWORD = password
     json_response = {}
     # ========================
-    options=Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--window-size=1920,1080")
-    msg = st.empty()
-    service = Service(ChromeDriverManager().install())
-
-    # Setup Selenium WebDriver (using Chrome in GUI mode)
+    
     driver = get_driver() # This will open the browser with a GUI window
     msg.info("Signing In.Please wait")
         # Open Cognito login page
