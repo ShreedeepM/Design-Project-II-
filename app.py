@@ -41,7 +41,7 @@ def fun(username,password):
     service = Service(ChromeDriverManager().install())
     
     # Setup Selenium WebDriver (using Chrome in GUI mode)
-    driver = webdriver.Chrome(ChromeDriverManager(version="114.0.5735.90").install(), options=options)  # This will open the browser with a GUI window
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)  # This will open the browser with a GUI window
     msg.info("Signing In.Please wait")
         # Open Cognito login page
     driver.get(Cognito_URL)
