@@ -14,10 +14,18 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.core.os_manager import ChromeType
 
 from selenium.common.exceptions import TimeoutException
 
-
+@st.cache_resource
+def get_driver():
+    return webdriver.Chrome(
+        service=Service(
+            ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+        ),
+        options=options,
+    )
 def fun(username,password):
     # ===== CONFIGURATION =====
     Cognito_URL = 'https://user.faceprep.online/'  # Replace with actual Cognito login URL
