@@ -1,8 +1,6 @@
 
-seleniumbase
-streamlit
-polaris
-pandas
 
 
+langchain-core
+google-generativeai
 
