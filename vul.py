@@ -7,7 +7,7 @@ app = Flask(__name__)
 # VULNERABILITY 1: Hardcoded Secret Key
 # 'bandit' will flag this as a hardcoded password/key.
 app.config['SECRET_KEY'] = 'supersecretkey123' 
-
+#hi
 # VULNERABILITY 2: SQL Injection (CWE-89)
 # 'bandit' and 'CodeQL' will flag this.
 # A user can provide malicious input like "' OR '1'='1" to bypass logic.
