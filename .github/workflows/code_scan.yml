@@ -1,0 +1,52 @@
+# .github/workflows/code_scan.yml
+
+name: AI Code Analysis
+
+# Run this workflow on every push and pull request to the main branch
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  analyze:
+    # Use the latest version of Ubuntu to run the job
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out your repository's code
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # 2. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # You can change this to your preferred version
+
+      # 3. Install Python dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Manually install if requirements.txt is missing
+          pip install langchain-core google-generativeai
+
+      # 4. Run the AI code scan
+      # This securely passes the API key from GitHub Secrets
+      # to the script as an environment variable.
+      - name: Run AI Code Scan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          # Rename your script to scan.py or update this line
+          python langchain_analyzer.py 
+
+      # 5. (Optional) Upload the report as an artifact
+      # This lets you download the .md report from the Actions run page
+      - name: Upload Analysis Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-code-analysis-report
+          path: ai_code_analysis_report.md
