@@ -56,4 +56,5 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           # We no longer need the 'if' check, as the file is guaranteed to exist.
           cat ai_code_analysis_report.md >> $GITHUB_STEP_SUMMARY
+          echo ai_code_analysis_report.md
 
