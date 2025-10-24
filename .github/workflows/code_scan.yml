@@ -41,7 +41,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           # Rename your script to scan.py or update this line
-          python langchain_analyzer.py 
+          python scan.py 
 
       # 5. (Optional) Upload the report as an artifact
       # This lets you download the .md report from the Actions run page
