@@ -1,0 +1,95 @@
+# This is the name of your GitHub Actions workflow.
+# It will show up in the "Actions" tab of your repository.
+name: Python Security Scan
+
+# This section defines when the workflow will run.
+on:
+  # Run on pushes to the "main" branch.
+  push:
+    branches: [ "main" ]
+  
+  # Allows you to manually run this workflow from the Actions tab.
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel.
+jobs:
+  # Job 1: Runs lightweight, fast checks using Bandit and Safety.
+  lightweight_scan:
+    name: Lightweight Scan (Bandit & Safety)
+    # Run on the latest available GitHub-hosted Ubuntu runner.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out your repository's code so the workflow can access it.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up a Python environment.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # You can change this to your project's Python version
+
+      # Step 3: Install the security tools.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety
+          # Install your app's dependencies if needed by safety, though
+          # checking the requirements.txt file directly is usually sufficient.
+          # if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # Step 4: Run Bandit to scan for code vulnerabilities (like flask debug=True)
+      # The '-r .' flag means 'recursively scan all .py files from the current directory'.
+      # Bandit will automatically fail the job (exit with a non-zero code) if it finds issues.
+      - name: Run Bandit (SAST)
+        run: |
+          echo "Running Bandit security scan..."
+          bandit -r .
+
+      # Step 5: Run Safety to scan requirements.txt for vulnerable packages.
+      # This will also fail the job if it finds any known vulnerabilities.
+      - name: Run Safety (SCA)
+        run: |
+          echo "Running Safety package scan..."
+          if [ -f requirements.txt ]; then
+            safety check -r requirements.txt
+          else
+            echo "::warning::No requirements.txt file found. Skipping Safety scan."
+          fi
+
+  # Job 2: Runs a deep scan using GitHub's built-in CodeQL engine.
+  codeql_scan:
+    name: Deep Scan (CodeQL)
+    runs-on: ubuntu-latest
+    
+    # These permissions are required for CodeQL to work correctly.
+    # It needs to read your code and write the scan results to the
+    # "Security" tab of your repository.
+    permissions:
+      security-events: write # to upload results to the Security tab
+      actions: read
+      contents: read
+
+    steps:
+      # Step 1: Check out your repository's code.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Step 2: Initialize the CodeQL analysis.
+      # It automatically detects the language (Python in this case).
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: 'python'
+          # 'security-extended' runs more queries, but 'security-and-quality' is a good default.
+          queries: security-and-quality 
+
+      # Step 3: CodeQL builds a database of your code to analyze it.
+      # For Python, this step mainly sets up the environment.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      # Step 4: Perform the actual analysis and upload the results.
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
