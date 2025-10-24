@@ -40,13 +40,14 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # Rename your script to scan.py or update this line
+          # Make sure your Python script is named scan.py
+          # or update this line to 'python langchain_analyzer.py'
           python scan.py 
 
-      # 5. (Optional) Upload the report as an artifact
-      # This lets you download the .md report from the Actions run page
-      - name: Upload Analysis Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-code-analysis-report
-          path: ai_code_analysis_report.md
+      # 5. --- MODIFIED STEP ---
+      # Add the report content to the GitHub Actions job summary page
+      - name: Add report to Job Summary
+        run: |
+          echo '## AI Code Analysis Report' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          cat ai_code_analysis_report.md >> $GITHUB_STEP_SUMMARY
