@@ -40,14 +40,20 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          # --- ADDED THIS LINE ---
+          # Create an empty report file to ensure it always exists
+          touch ai_code_analysis_report.md
+          
           # Make sure your Python script is named scan.py
           # or update this line to 'python langchain_analyzer.py'
           python scan.py 
 
-      # 5. --- MODIFIED STEP ---
+      # 5. --- SIMPLIFIED STEP ---
       # Add the report content to the GitHub Actions job summary page
       - name: Add report to Job Summary
         run: |
           echo '## AI Code Analysis Report' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
+          # We no longer need the 'if' check, as the file is guaranteed to exist.
           cat ai_code_analysis_report.md >> $GITHUB_STEP_SUMMARY
+
