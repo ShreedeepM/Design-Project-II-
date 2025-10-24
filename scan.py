@@ -14,7 +14,7 @@ import google.generativeai as genai
 
 # !!! IMPORTANT: You must set your Google AI Studio API key here !!!
 # You can also set this as an environment variable `GEMINI_API_KEY`
-API_KEY = ""
+API_KEY = "AIzaSyAJ3Qkuolmm357RhyRhv5FgEM6BGT5KHds"
 
 # The model to use for analysis
 GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"
