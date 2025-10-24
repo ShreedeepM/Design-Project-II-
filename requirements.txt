@@ -1,6 +1,8 @@
 
 seleniumbase
-streamlit==1.45.1
+streamlit
+polaris
 pandas
+
 
 
