@@ -1,257 +1,273 @@
 import os
-import requests
-import json
 import time
-import base64
-import concurrent.futures
+import json
+import asyncio
+from typing import TypedDict, List, Dict, Any
+from collections import Counter
+
+# We now import from langchain_core
+from langchain_core.runnables import RunnableLambda
+
+import google.generativeai as genai
 
 # --- Configuration ---
-# Get necessary info from environment variables
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-REPO_NAME = os.environ.get('GITHUB_REPOSITORY') # e.g., "owner/repo"
-COMMIT_SHA = os.environ.get('COMMIT_SHA')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Gemini API endpoint
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={GEMINI_API_KEY}"
+# !!! IMPORTANT: You must set your Google AI Studio API key here !!!
+# You can also set this as an environment variable `GEMINI_API_KEY`
+API_KEY = ""
 
-# GitHub API Headers
-GH_HEADERS = {
-    "Authorization": f"Bearer {GITHUB_TOKEN}",
-    "Accept": "application/vnd.github.v3+json",
-    "X-GitHub-Api-Version": "2022-11-28"
-}
+# The model to use for analysis
+GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"
 
-# Max workers for parallel processing
-MAX_WORKERS = 10
+# --- NEW SYSTEM PROMPT ---
+# This prompt is updated to ask for the specific format you requested.
+# It focuses on common, well-known security anti-patterns (SAST).
+SYSTEM_PROMPT = """
+You are an expert cybersecurity analyst performing a static code analysis.
+Your goal is to identify potential security risks and bad practices.
 
-# --- 1. System Prompt for LLM ---
-# This is the core instruction for the LLM.
-# It tells the model to act as a security expert.
-SECURITY_SYSTEM_PROMPT = """
-You are an expert security auditor and a helpful AI assistant.
-Your task is to analyze the provided code for potential security vulnerabilities.
-Focus on common issues such as:
+Analyze the following code snippet and identify a list of potential issues.
+Focus on common, well-known issues like:
 - SQL Injection
 - Cross-Site Scripting (XSS)
-- Remote Code Execution (RCE)
-- Insecure Deserialization
 - Hardcoded secrets or API keys
-- Broken Access Control
-- Improper Error Handling that leaks sensitive information
+- Insecure deserialization
+- Use of dangerous functions (like 'eval' or 'exec')
 
-For each file, respond in the following format:
-- If NO vulnerabilities are found, respond with ONLY the string: "No vulnerabilities found."
-- If vulnerabilities ARE found, provide a list in this format:
+For each issue found, provide:
+1.  "vulnerability": A brief name for the issue (e.g., "SQL Injection").
+2.  "level": A severity rating (Critical, High, Medium, or Low).
+3.  "line": The line number where the issue occurs.
+4.  "snippet": The exact line of code that is problematic.
 
-**File: `{file_name}`**
-
-* **Vulnerability:** {Type of vulnerability}
-* **Line:** {Line number}
-* **Risk:** {Brief, 1-sentence explanation of the risk}
-* **Suggestion:** {Brief, 1-sentence suggestion for fixing}
----
-* **Vulnerability:** {Another vulnerability}
-* **Line:** ...
-* **Risk:** ...
-* **Suggestion:** ...
----
+Do NOT generate exploits. Only identify and classify the potential risks.
+Format your response as a single JSON object with one key: "findings".
+"findings" should be a list of objects, where each object contains the four fields above.
+If no issues are found, return an empty list: {"findings": []}
 """
 
-def call_gemini_with_backoff(payload, retries=5, delay=5):
+# Configure the Gemini client
+if API_KEY:
+    genai.configure(api_key=API_KEY)
+elif os.environ.get("GEMINI_API_KEY"):
+    # If script key is empty, try to get from environment
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+else:
+    print("Error: API key not found. Set the API_KEY variable or GEMINI_API_KEY environment variable.")
+    exit()
+
+model = genai.GenerativeModel(
+    GEMINI_MODEL,
+    system_instruction=SYSTEM_PROMPT,
+    generation_config=genai.GenerationConfig(
+        response_mime_type="application/json",
+        temperature=0.2, # Lower temperature for more deterministic, factual output
+        max_output_tokens=2048
+    )
+)
+
+# --- "Sub-Agent" (The function our parallel workers will run) ---
+
+async def analyze_code_chunk(file_info: Dict[str, str]) -> Dict[str, Any]:
     """
-    Calls the Gemini API with exponential backoff for rate limiting.
+    This is the "sub-agent." It analyzes a single file's content using Gemini.
     """
-    for i in range(retries):
+    file_path = file_info['path']
+    content = file_info['content']
+    print(f"[Sub-Agent] Analyzing: {file_path}")
+
+    # Add exponential backoff for API calls
+    for attempt in range(3):
         try:
-            response = requests.post(GEMINI_API_URL, headers={"Content-Type": "application/json"}, json=payload)
+            user_query = f"Here is the code from `{file_path}`:\n\n```\n{content}\n```"
+            response = await model.generate_content_async(user_query)
+            
+            # --- ROBUST CHECK ---
+            if not response.candidates:
+                raise Exception("No candidates returned from API.")
 
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 429: # Rate limit exceeded
-                print(f"Rate limit hit. Retrying in {delay}s...")
-                time.sleep(delay)
-                delay *= 2 # Exponential backoff
+            candidate = response.candidates[0]
+            
+            # --- FIXED CHECK ---
+            # We check the string .name of the enum, which is more robust
+            if candidate.finish_reason.name != "STOP":
+                raise Exception(f"Response generation stopped early. Reason: {candidate.finish_reason.name}")
+            
+            # The AI should return a JSON object, e.g., {"findings": [...]}
+            analysis_json = json.loads(response.text)
+            return {"path": file_path, "analysis": analysis_json}
+
+        except json.JSONDecodeError as e:
+            print(f"[Sub-Agent] JSONDecodeError for {file_path}: {e}")
+            return {"path": file_path, "analysis": {"error": f"Failed to decode API JSON response: {e}", "findings": []}}
+        
+        except Exception as e:
+            print(f"[Sub-Agent] Error analyzing {file_path} (Attempt {attempt + 1}): {e}")
+            if attempt < 2:
+                await asyncio.sleep(2 ** (attempt + 1)) # 2s, 4s
             else:
-                print(f"Error calling Gemini API: {response.status_code}")
-                print(response.text)
-                return None # Failed after non-retryable error
-        except requests.exceptions.RequestException as e:
-            print(f"Request exception: {e}. Retrying in {delay}s...")
-            time.sleep(delay)
-            delay *= 2
+                return {"path": file_path, "analysis": {"error": f"Failed after 3 attempts: {e}", "findings": []}}
+                
+    return {"path": file_path, "analysis": {"error": "Unknown error in sub-agent after all retries.", "findings": []}}
+
+
+# --- Helper Functions (Steps) ---
+
+def find_files(scan_directory: str) -> List[str]:
+    """
+    Step 1: Find all relevant files in the directory.
+    """
+    print("[Main Agent] Step 1: Discovering files...")
+    file_paths = []
     
-    print("Failed to call Gemini API after all retries.")
-    return None
+    # --- UPDATED EXCLUSION LIST ---
+    exclude_files = {"analysis_report.md", "scan.py", "langchain_analyzer.py"}
+    exclude_dirs = {".git", ".venv", "node_modules", "__pycache__"}
 
-def analyze_code_with_gemini(file_name, code_content):
-    """
-    Sends code to the Gemini API for analysis.
-    """
-    if not GEMINI_API_KEY:
-        print("Error: GEMINI_API_KEY is not set.")
-        return "Error: GEMINI_API_KEY is not configured for this repository."
-
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": f"Analyze this code from the file `{file_name}`:\n\n```\n{code_content}\n```"
-            }]
-        }],
-        "systemInstruction": {
-            "parts": [{
-                "text": SECURITY_SYSTEM_PROMPT
-            }]
-        },
-    }
-
-    try:
-        result = call_gemini_with_backoff(payload)
+    for root, dirs, files in os.walk(scan_directory):
+        # Exclude specified directories
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
         
-        if result and result.get('candidates'):
-            text = result['candidates'][0]['content']['parts'][0]['text']
-            return text
-        else:
-            print(f"Unexpected API response: {result}")
-            return f"Error analyzing {file_name}: Invalid API response."
-
-    except Exception as e:
-        print(f"Error during Gemini API call for {file_name}: {e}")
-        return f"Error analyzing {file_name}: {e}"
-
-def get_all_repo_files():
-    """
-    Gets a list of all file paths in the repo.
-    """
-    url = f"https://api.github.com/repos/{REPO_NAME}/git/trees/{COMMIT_SHA}?recursive=1"
-    try:
-        response = requests.get(url, headers=GH_HEADERS)
-        response.raise_for_status()
-        tree = response.json().get('tree', [])
-        # Filter for files ('blob') only, ignore directories ('tree')
-        file_paths = [item['path'] for item in tree if item['type'] == 'blob']
-        return file_paths
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching repo tree: {e}")
-        return []
-
-def get_file_content(file_path):
-    """
-    Gets the raw content of a single file from its path.
-    """
-    url = f"https://api.github.com/repos/{REPO_NAME}/contents/{file_path}?ref={COMMIT_SHA}"
+        for file in files:
+            # Explicitly skip our own report file and this script
+            if file in exclude_files:
+                continue
+                
+            if file.endswith(('.py', '.js', '.java', '.go', '.php', '.html', '.sh', '.md', '.txt')):
+                file_paths.append(os.path.join(root, file))
     
-    try:
-        response = requests.get(url, headers=GH_HEADERS)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data.get('encoding') == 'base64' and data.get('content'):
-            # Decode the base64 content
-            content = base64.b64decode(data['content']).decode('utf-8')
-            return content
-        else:
-            print(f"Could not decode file content for: {file_path}")
-            return None
-    except requests.exceptions.RequestException as e:
-        # Handle file-not-found or other errors
-        print(f"Error fetching file content from {url}: {e}")
-        return None
-    except Exception as e:
-        print(f"Error decoding file {file_path}: {e}")
-        return None
+    print(f"[Main Agent] Found {len(file_paths)} files.")
+    return file_paths
 
-def post_comment_to_commit(comment_body):
+def read_files(file_paths: List[str]) -> List[Dict[str, str]]:
     """
-    Posts a final comment to the GitHub commit.
+    Step 2: Read the content of all found files.
     """
-    url = f"https://api.github.com/repos/{REPO_NAME}/commits/{COMMIT_SHA}/comments"
-    payload = {"body": comment_body}
+    print(f"[Main Agent] Step 2: Reading {len(file_paths)} files...")
+    files_with_content = []
+    for file_path in file_paths:
+        try:
+            if os.path.getsize(file_path) > 50_000:  # 50KB limit
+                print(f"[Skipping] File too large: {file_path}")
+                continue
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                files_with_content.append({"path": file_path, "content": content})
+        except Exception as e:
+            print(f"[Skipping] Could not read {file_path}: {e}")
+            
+    print(f"[Main Agent] Read {len(files_with_content)} files successfully.")
+    return files_with_content
+
+# --- NEW REPORT COMPILER ---
+
+def compile_report(analysis_results: List[Dict[str, Any]]) -> str:
+    """
+    Step 4: This is the "reduce" step.
+    Compile all results into the new vulnerability report format.
+    """
+    print("[Main Agent] Step 4: Compiling final report...")
     
-    try:
-        response = requests.post(url, headers=GH_HEADERS, json=payload)
-        response.raise_for_status()
-        print(f"Successfully posted comment to commit {COMMIT_SHA}.")
-    except requests.exceptions.RequestException as e:
-        print(f"Error posting comment to commit: {e}")
-        print(f"Response body: {response.text}")
-
-def analyze_file_job(file_path):
-    """
-    A single job for the thread pool: fetch content and analyze.
-    """
-    # Simple filter for common file types to scan
-    if not (file_path.endswith('.py') or file_path.endswith('.js') or 
-            file_path.endswith('.go') or file_path.endswith('.java') or
-            file_path.endswith('.php') or file_path.endswith('.ts') or
-            file_path.endswith('.html') or file_path.endswith('.sh') or
-            file_path.endswith('.yml') or file_path.endswith('.yaml') or
-            file_path.endswith('.json') or file_path.endswith('.tf')):
-        print(f"Skipping file (not a scannable type): {file_path}")
-        return None
-        
-    print(f"Analyzing file: {file_path}...")
-    content = get_file_content(file_path)
+    level_counts = Counter()
+    report_body = ""
     
-    if content:
-        analysis_result = analyze_code_with_gemini(file_path, content)
-        
-        if "No vulnerabilities found." not in analysis_result:
-            return analysis_result # Return the formatted vulnerability string
-        else:
-            print(f"No vulnerabilities found in {file_path}.")
-            return None
-    else:
-        print(f"Could not fetch content for {file_path}. Skipping.")
-        return None
+    for result in analysis_results:
+        file_path = result['path']
+        analysis = result['analysis']
 
-def main():
+        # Check for errors first
+        if "error" in analysis:
+            report_body += f"## File: `{file_path}`\n\n"
+            report_body += f"**Analysis Error:** {analysis['error']}\n\n"
+            report_body += ("-" * 40) + "\n\n"
+            continue
+
+        # Get the list of findings
+        findings = analysis.get('findings', [])
+        
+        if not findings:
+            continue
+
+        report_body += f"## File: `{file_path}`\n\n"
+        
+        for finding in findings:
+            level = finding.get('level', 'Unknown').capitalize()
+            level_counts[level] += 1
+            
+            report_body += f"Vulnerability: {finding.get('vulnerability', 'N/A')}\n"
+            report_body += f"Level: {level}\n"
+            report_body += f"Line {finding.get('line', '?')}: `{finding.get('snippet', 'N/A')}`\n\n"
+        
+        report_body += ("-" * 40) + "\n\n"
+
+    # --- Build the final report with summary at the top ---
+    
+    report_header = "# Vulnerability Summary\n\n"
+    report_header += f"Level Critical: {level_counts['Critical']}\n"
+    report_header += f"Level High: {level_counts['High']}\n"
+    report_header += f"Level Medium: {level_counts['Medium']}\n"
+    report_header += f"Level Low: {level_counts['Low']}\n"
+    report_header += ("=" * 40) + "\n\n"
+    
+    return report_header + report_body
+
+# --- Main Orchestrator ---
+
+async def main():
     """
-    Main execution flow.
+    Main function to build the chain and run the analysis.
     """
-    if not all([GITHUB_TOKEN, REPO_NAME, COMMIT_SHA, GEMINI_API_KEY]):
-        print("Error: Missing one or more environment variables.")
-        print(f"REPO_NAME: {REPO_NAME}, COMMIT_SHA: {COMMIT_SHA}")
-        print(f"GITHUB_TOKEN: {'SET' if GITHUB_TOKEN else 'NOT SET'}")
-        print(f"GEMINI_API_KEY: {'SET' if GEMINI_API_KEY else 'NOT SET'}")
+    
+    # --- Define the LCEL Chain ---
+    
+    # 1. The "map" step: A RunnableLambda that points to our async "sub-agent" function.
+    #    LangChain's .map() will run this concurrently for every item in the input list.
+    analysis_chain = RunnableLambda(analyze_code_chunk)
+    
+    # 2. The "reduce" step: A RunnableLambda that points to our report compiler.
+    report_chain = RunnableLambda(compile_report)
+    
+    # 3. Combine them:
+    #    - The input list of files will go to analysis_chain.map()
+    #    - The output list of results will be piped to report_chain
+    full_chain = analysis_chain.map() | report_chain
+
+    # --- Run the chain ---
+    print("[Main Agent] Workflow starting...")
+    start_time = time.time()
+    
+    # Prepare the input for the chain
+    # The script now correctly finds its own name ('langchain_analyzer.py')
+    # and adds it to the exclude list.
+    script_name = os.path.basename(__file__)
+    file_paths = find_files(scan_directory='.')
+    
+    # A small safeguard to ensure the running script is never analyzed
+    file_paths = [p for p in file_paths if os.path.basename(p) not in {script_name, "scan.py"}]
+
+    files_to_analyze = read_files(file_paths)
+    
+    if not files_to_analyze:
+        print("[Main Agent] No files found to analyze. Exiting.")
         return
 
-    print(f"Starting parallel security scan for commit {COMMIT_SHA} in {REPO_NAME}...")
+    print(f"[Main Agent] Step 3: Mapping {len(files_to_analyze)} files to sub-agents...")
     
-    file_paths = get_all_repo_files()
-    if not file_paths:
-        print("No files found or error fetching file tree. Exiting.")
-        return
-
-    final_report = f"### 🛡️ LLM Security Scan Results\n\n**Commit:** `{COMMIT_SHA}`\n\n"
-    vulnerabilities_found = False
-    analysis_results = []
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Create a dictionary to map futures to file paths
-        future_to_file = {executor.submit(analyze_file_job, path): path for path in file_paths}
+    # Asynchronously invoke the chain
+    report_content = await full_chain.ainvoke(files_to_analyze)
         
-        for future in concurrent.futures.as_completed(future_to_file):
-            try:
-                result = future.result()
-                if result:
-                    analysis_results.append(result)
-                    vulnerabilities_found = True
-            except Exception as exc:
-                file_path = future_to_file[future]
-                print(f'{file_path} generated an exception: {exc}')
+    end_time = time.time()
+    print(f"\n[Main Agent] Workflow complete in {end_time - start_time:.2f} seconds.")
 
-    if not vulnerabilities_found:
-        final_report += "✅ **All scanned files look good!** No vulnerabilities were detected by the LLM."
-    else:
-        # Join all the individual vulnerability reports
-        final_report += "\n\n".join(analysis_results)
+    # Save the final report
+    report_filename = "analysis_report.md"
     
-    final_report += "\n\n*Disclaimer: This is an AI-generated analysis. Please review all findings manually.*"
-    
-    post_comment_to_commit(final_report)
-    print("Security scan complete.")
+    with open(report_filename, "w", encoding="utf-8") as f:
+        f.write(report_content)
+        
+    print(f"[Main Agent] Report saved to {report_filename}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
 
