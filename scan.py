@@ -62,7 +62,7 @@ model = genai.GenerativeModel(
     generation_config=genai.GenerationConfig(
         response_mime_type="application/json",
         temperature=0.2, # Lower temperature for more deterministic, factual output
-        max_output_tokens=2048
+        max_output_tokens=8048
     )
 )
 
