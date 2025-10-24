@@ -3,20 +3,19 @@
 
 name: 'LLM Security Scan'
 
-# Trigger the workflow on pull request events
+# Trigger the workflow on push events to any branch
 on:
-  pull_request:
-    types: [opened, synchronize] # Run on new PRs and when new commits are pushed
+  push:
 
 permissions:
-  contents: read      # To check out the code
-  pull-requests: write # To write comments on the PR
+  contents: read    # To check out code and read repository contents
+  commits: write  # To write comments on the commit
 
 jobs:
   security-scan:
     runs-on: ubuntu-latest
     steps:
-      # 1. Check out the repository code
+      # 1. Check out the repository code at the specific commit
       - name: 'Checkout code'
         uses: actions/checkout@v4
 
@@ -36,9 +35,10 @@ jobs:
       - name: 'Run LLM Security Scan'
         run: python scan.py
         env:
-          # Pass the GitHub token and PR info to the script
+          # Pass the GitHub token and commit info to the script
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_SHA: ${{ github.sha }}
           # Pass the Gemini API key from repository secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
