@@ -1,12 +1,10 @@
-# This file goes in your repository at this exact path:
-# .github/workflows/security_scan.yml
-
 name: 'LLM Security Scan'
 
 # Trigger the workflow on push events to any branch
 on:
   push:
 
+# TOP-LEVEL permissions for the entire workflow
 permissions:
   contents: read    # To check out code and read repository contents
   commits: write  # To write comments on the commit
