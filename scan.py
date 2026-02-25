@@ -17,7 +17,7 @@ import google.generativeai as genai
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # The model to use for analysis
-GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # --- NEW SYSTEM PROMPT ---
 # This prompt is updated to ask for the specific format you requested.
