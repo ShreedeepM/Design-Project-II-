@@ -5,7 +5,7 @@ import os
 app = Flask(__name__)
 
 
-
+#made this changes
 # VULNERABILITY 1: Hardcoded Secret Key
 # 'bandit' will flag this as a hardcoded password/key.
 app.config['SECRET_KEY'] = 'supersecretkey123' 
