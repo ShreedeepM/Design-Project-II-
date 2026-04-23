@@ -1,5 +1,3 @@
-# .github/workflows/code_scan.yml
-
 name: AI Code Analysis
 
 # Run this workflow on every push and pull request to the main branch
@@ -11,7 +9,6 @@ on:
 
 jobs:
   analyze:
-    # Use the latest version of Ubuntu to run the job
     runs-on: ubuntu-latest
 
     steps:
@@ -19,42 +16,45 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      # 2. Set up Python
+      # 2. --- NEW: Download and Install CodeQL CLI ---
+      - name: Install CodeQL CLI
+        run: |
+          echo "Downloading CodeQL CLI..."
+          wget -q https://github.com/github/codeql-action/releases/latest/download/codeql-bundle-linux64.tar.gz
+          echo "Extracting CodeQL..."
+          tar -xzf codeql-bundle-linux64.tar.gz
+          # Add the extracted codeql folder to the GitHub runner's PATH
+          echo "$PWD/codeql" >> $GITHUB_PATH
+
+      # 3. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # You can change this to your preferred version
+          python-version: '3.10'
 
-      # 3. Install Python dependencies
+      # 4. --- UPDATED: Install Python dependencies (New Gemini SDK + Requests) ---
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Manually install if requirements.txt is missing
-          pip install langchain-core google-generativeai
+          # Installed the updated 'google-genai' and 'requests' for NVD integration
+          pip install langchain-core google-genai requests
 
-      # 4. Run the AI code scan
-      # This securely passes the API key from GitHub Secrets
-      # to the script as an environment variable.
+      # 5. Run the AI code scan
       - name: Run AI Code Scan
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # Recommended: Add your NVD API key to GitHub Secrets to avoid rate limits
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }} 
         run: |
-          # --- ADDED THIS LINE ---
           # Create an empty report file to ensure it always exists
           touch analysis_report.md
           
-          # Make sure your Python script is named scan.py
-          # or update this line to 'python langchain_analyzer.py'
+          # Run the scanner script
           python scan.py 
 
-      # 5. --- SIMPLIFIED STEP ---
-      # Add the report content to the GitHub Actions job summary page
+      # 6. Add the report content to the GitHub Actions job summary page
       - name: Add report to Job Summary
         run: |
           echo '## AI Code Analysis Report' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          # We no longer need the 'if' check, as the file is guaranteed to exist.
           cat analysis_report.md >> $GITHUB_STEP_SUMMARY
-          echo analysis_report.md
-
