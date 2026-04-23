@@ -16,7 +16,7 @@ from google.genai import types
 # --- Configuration ---
 API_KEY = os.environ.get('GEMINI_API_KEY') 
 # Highly recommended: Get an NVD API key from https://nvd.nist.gov/developers/request-an-api-key
-NVD_API_KEY = os.environ.get('secrets.NVD_API_KEY')
+NVD_API_KEY = os.environ.get('NVD_API_KEY')
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 
 EXT_TO_CODEQL_LANG = {
